@@ -4,6 +4,7 @@ import httpx
 import redis
 import secrets
 from fastapi import FastAPI, Request, Depends, HTTPException
+from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from anthropic import Anthropic
 
@@ -18,12 +19,15 @@ REDIS_URL           = os.environ.get("REDIS_URL")
 ADMIN_USER          = os.environ.get("ADMIN_USER", "admin")
 ADMIN_PASS          = os.environ.get("ADMIN_PASS", "trocame123")
 
-client = Anthropic(api_key=ANTHROPIC_API_KEY)
-app    = FastAPI()
+client   = Anthropic(api_key=ANTHROPIC_API_KEY)
+app      = FastAPI()
 security = HTTPBasic()
 
+# ============================================================
+# AUTENTICAÇÃO
+# ============================================================
+
 def verificar_admin(credentials: HTTPBasicCredentials = Depends(security)):
-    """Verifica login e senha das rotas administrativas."""
     usuario_ok = secrets.compare_digest(credentials.username.encode(), ADMIN_USER.encode())
     senha_ok   = secrets.compare_digest(credentials.password.encode(), ADMIN_PASS.encode())
     if not (usuario_ok and senha_ok):
@@ -36,13 +40,11 @@ def verificar_admin(credentials: HTTPBasicCredentials = Depends(security)):
 
 # ============================================================
 # CONEXÃO COM REDIS
-# O histórico de cada aluno fica salvo pelo número de telefone.
-# Nunca se perde, mesmo se o servidor reiniciar.
 # ============================================================
 r = redis.from_url(REDIS_URL, decode_responses=True)
 
 # ============================================================
-# SYSTEM PROMPT — Personalidade e protocolo do Coach Run
+# SYSTEM PROMPT
 # ============================================================
 SYSTEM_PROMPT = """
 Você é o Coach Run, um treinador de corrida especialista com mais de 15 anos de experiência.
@@ -130,60 +132,96 @@ TOM E FORMATO PARA WHATSAPP:
 """
 
 # ============================================================
+# LAYOUT BASE DO PAINEL
+# ============================================================
+CSS = """
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: Arial, sans-serif; background: #f0f2f5; color: #333; }
+header { background: #1a1a2e; color: white; padding: 16px 24px; display: flex; align-items: center; gap: 12px; }
+header h1 { font-size: 18px; }
+.container { max-width: 800px; margin: 30px auto; padding: 0 20px; }
+.card { background: white; border-radius: 12px; padding: 20px; margin-bottom: 16px; box-shadow: 0 1px 4px rgba(0,0,0,0.08); }
+.card h2 { font-size: 16px; margin-bottom: 16px; color: #555; }
+a { color: #4f46e5; text-decoration: none; }
+a:hover { text-decoration: underline; }
+.badge { display: inline-block; background: #e0e7ff; color: #4f46e5; border-radius: 20px; padding: 2px 10px; font-size: 12px; margin-left: 8px; }
+.aluno-row { display: flex; justify-content: space-between; align-items: center; padding: 12px 0; border-bottom: 1px solid #f0f0f0; }
+.aluno-row:last-child { border-bottom: none; }
+.aluno-info { font-size: 12px; color: #999; margin-top: 4px; max-width: 480px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.btn { display: inline-block; padding: 6px 14px; border-radius: 8px; font-size: 13px; cursor: pointer; border: none; text-decoration: none; }
+.btn-danger { background: #fee2e2; color: #dc2626; }
+.btn-danger:hover { background: #fecaca; text-decoration: none; }
+.back { display: inline-block; margin-bottom: 16px; font-size: 14px; }
+.total { font-size: 13px; color: #888; margin-bottom: 16px; }
+.chat { display: flex; flex-direction: column; gap: 10px; }
+.msg { display: flex; flex-direction: column; max-width: 80%; }
+.msg.aluno { align-self: flex-end; align-items: flex-end; }
+.msg.bot { align-self: flex-start; align-items: flex-start; }
+.label { font-size: 11px; color: #aaa; margin-bottom: 3px; padding: 0 6px; }
+.balao { padding: 10px 14px; border-radius: 16px; font-size: 14px; line-height: 1.6; }
+.aluno .balao { background: #dcf8c6; border-bottom-right-radius: 4px; }
+.bot .balao { background: #f8f8f8; border-bottom-left-radius: 4px; box-shadow: 0 1px 2px rgba(0,0,0,0.08); }
+"""
+
+def base_html(titulo: str, conteudo: str) -> str:
+    return f"""<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{titulo} — Coach Run</title>
+    <style>{CSS}</style>
+</head>
+<body>
+    <header>
+        <span>🏃</span>
+        <h1>Coach Run — Painel Admin</h1>
+    </header>
+    <div class="container">
+        {conteudo}
+    </div>
+</body>
+</html>"""
+
+# ============================================================
 # FUNÇÕES DE HISTÓRICO COM REDIS
 # ============================================================
 
-HISTORICO_LIMITE = 40  # máximo de mensagens guardadas por aluno
+HISTORICO_LIMITE = 40
 
 def obter_historico(telefone: str) -> list:
-    """Busca o histórico do aluno no Redis."""
     dados = r.get(f"historico:{telefone}")
     if not dados:
         return []
-    historico = json.loads(dados)
-    return historico[-HISTORICO_LIMITE:]
-
+    return json.loads(dados)[-HISTORICO_LIMITE:]
 
 def salvar_historico(telefone: str, historico: list):
-    """Salva o histórico do aluno no Redis. Sem expiração — guarda para sempre."""
     r.set(f"historico:{telefone}", json.dumps(historico))
 
-
 def salvar_mensagem(telefone: str, role: str, conteudo: str):
-    """Adiciona uma mensagem ao histórico do aluno no Redis."""
     historico = obter_historico(telefone)
     historico.append({"role": role, "content": conteudo})
     salvar_historico(telefone, historico)
-
 
 # ============================================================
 # FUNÇÕES AUXILIARES
 # ============================================================
 
 async def enviar_whatsapp(telefone: str, mensagem: str):
-    """Envia mensagem de volta para o aluno via Z-API."""
-    # Corrige o número brasileiro — adiciona o 9 após o DDD se necessário
     numero_limpo = telefone.replace("+", "").replace("-", "").replace(" ", "")
     if numero_limpo.startswith("55") and len(numero_limpo) == 12:
         numero_limpo = numero_limpo[:4] + "9" + numero_limpo[4:]
 
     url = f"https://api.z-api.io/instances/{ZAPI_INSTANCE_ID}/token/{ZAPI_TOKEN}/send-text"
-    headers = {
-        "Content-Type": "application/json",
-        "Client-Token": ZAPI_CLIENT_TOKEN
-    }
-    payload = {
-        "phone": numero_limpo,
-        "message": mensagem
-    }
+    headers = {"Content-Type": "application/json", "Client-Token": ZAPI_CLIENT_TOKEN}
+    payload = {"phone": numero_limpo, "message": mensagem}
+
     print(f"ENVIANDO para {numero_limpo}")
     async with httpx.AsyncClient(timeout=30) as http:
         response = await http.post(url, headers=headers, json=payload)
         print(f"Z-API STATUS: {response.status_code} | {response.text}")
 
-
 async def chamar_claude(telefone: str, mensagem_usuario: str) -> str:
-    """Envia o histórico + nova mensagem para o Claude e retorna a resposta."""
     salvar_mensagem(telefone, "user", mensagem_usuario)
     historico = obter_historico(telefone)
 
@@ -198,67 +236,112 @@ async def chamar_claude(telefone: str, mensagem_usuario: str) -> str:
     salvar_mensagem(telefone, "assistant", texto_resposta)
     return texto_resposta
 
-
 # ============================================================
-# ROTAS
+# ROTAS PÚBLICAS
 # ============================================================
 
 @app.get("/")
 def status():
-    """Rota de verificação — confirma que o servidor está no ar."""
     return {"status": "Coach Run online 🏃"}
 
+# ============================================================
+# ROTAS ADMINISTRATIVAS — protegidas com login e senha
+# ============================================================
 
-@app.get("/alunos")
-def listar_alunos(admin: str = Depends(verificar_admin)):
-    """Lista todos os alunos que já conversaram com o Coach Run."""
+@app.get("/admin", response_class=HTMLResponse)
+def painel_admin(admin: str = Depends(verificar_admin)):
+    """Painel principal — lista todos os alunos."""
     chaves = r.keys("historico:*")
-    alunos = []
-    for chave in chaves:
+    rows = ""
+    for chave in sorted(chaves):
         telefone = chave.replace("historico:", "")
         historico = obter_historico(telefone)
-        total_mensagens = len(historico)
-        ultima_mensagem = historico[-1]["content"][:60] + "..." if historico else ""
-        alunos.append({
-            "telefone": telefone,
-            "total_mensagens": total_mensagens,
-            "ultima_mensagem": ultima_mensagem
-        })
-    return {"total_alunos": len(alunos), "alunos": alunos}
+        total = len(historico)
+        ultima = historico[-1]["content"][:80] + "..." if historico else "—"
+        rows += f"""
+        <div class="aluno-row">
+            <div>
+                <div>
+                    <a href="/admin/conversa/{telefone}">📱 {telefone}</a>
+                    <span class="badge">{total} msgs</span>
+                </div>
+                <div class="aluno-info">{ultima}</div>
+            </div>
+            <a href="/admin/apagar/{telefone}" onclick="return confirm('Apagar histórico de {telefone}?')">
+                <span class="btn btn-danger">🗑 Apagar</span>
+            </a>
+        </div>"""
+
+    if not rows:
+        rows = "<p style='color:#888;padding:20px 0'>Nenhum aluno ainda.</p>"
+
+    conteudo = f"""
+    <div class="card">
+        <h2>👥 Alunos ({len(chaves)} total)</h2>
+        {rows}
+    </div>"""
+
+    return HTMLResponse(base_html("Alunos", conteudo))
 
 
-@app.get("/historico/{telefone}")
-def ver_historico(telefone: str, admin: str = Depends(verificar_admin)):
-    """Retorna o histórico completo de conversa de um aluno."""
+@app.get("/admin/conversa/{telefone}", response_class=HTMLResponse)
+def ver_conversa(telefone: str, admin: str = Depends(verificar_admin)):
+    """Visualiza a conversa completa de um aluno no estilo WhatsApp."""
     historico = obter_historico(telefone)
+
     if not historico:
-        return {"erro": "Aluno não encontrado ou sem histórico"}
-    return {
-        "telefone": telefone,
-        "total_mensagens": len(historico),
-        "conversa": historico
-    }
+        conteudo = f"""
+        <a class="back" href="/admin">← Voltar</a>
+        <div class="card"><p>Nenhuma conversa encontrada para {telefone}.</p></div>"""
+        return HTMLResponse(base_html(telefone, conteudo))
+
+    msgs = ""
+    for msg in historico:
+        role = msg["role"]
+        texto = msg["content"].replace("\n", "<br>")
+        if role == "user":
+            msgs += f"""
+            <div class="msg aluno">
+                <div class="label">👤 Aluno</div>
+                <div class="balao">{texto}</div>
+            </div>"""
+        else:
+            msgs += f"""
+            <div class="msg bot">
+                <div class="label">🏃 Coach Run</div>
+                <div class="balao">{texto}</div>
+            </div>"""
+
+    conteudo = f"""
+    <a class="back" href="/admin">← Voltar para lista de alunos</a>
+    <div class="card">
+        <h2>💬 Conversa com {telefone}</h2>
+        <div class="total">{len(historico)} mensagens</div>
+        <div class="chat">{msgs}</div>
+    </div>"""
+
+    return HTMLResponse(base_html(telefone, conteudo))
 
 
-@app.delete("/historico/{telefone}")
+@app.get("/admin/apagar/{telefone}")
 def apagar_historico(telefone: str, admin: str = Depends(verificar_admin)):
-    """Apaga o histórico de um aluno — útil para resetar a conversa."""
+    """Apaga o histórico de um aluno e volta para o painel."""
     r.delete(f"historico:{telefone}")
-    return {"status": "ok", "mensagem": f"Histórico de {telefone} apagado."}
+    return RedirectResponse(url="/admin")
 
+# ============================================================
+# WEBHOOK — recebe mensagens do WhatsApp
+# ============================================================
 
 @app.post("/webhook")
 async def webhook(request: Request):
-    """Recebe as mensagens do WhatsApp via Z-API."""
     try:
         dados = await request.json()
 
         if dados.get("type") != "ReceivedCallback":
             return {"status": "ignorado"}
-
         if dados.get("fromMe"):
             return {"status": "ignorado"}
-
         if dados.get("isGroup"):
             return {"status": "ignorado"}
 
@@ -269,10 +352,8 @@ async def webhook(request: Request):
             return {"status": "ignorado"}
 
         print(f"Mensagem de {telefone}: {texto}")
-
         resposta = await chamar_claude(telefone, texto)
         await enviar_whatsapp(telefone, resposta)
-
         print(f"Resposta enviada para {telefone}")
         return {"status": "ok"}
 
