@@ -130,14 +130,15 @@ def salvar_mensagem(telefone: str, role: str, conteudo: str):
 async def enviar_whatsapp(telefone: str, mensagem: str):
     """Envia mensagem de volta para o aluno via Z-API."""
     # Corrige o número brasileiro — adiciona o 9 após o DDD se necessário
-    # Ex: 5551 99798899 → 55519 9798899 (11 dígitos sem o código do país)
     numero_limpo = telefone.replace("+", "").replace("-", "").replace(" ", "")
     if numero_limpo.startswith("55") and len(numero_limpo) == 12:
-        # Faltando o nono dígito — insere após os 4 primeiros dígitos (55 + DDD)
         numero_limpo = numero_limpo[:4] + "9" + numero_limpo[4:]
 
     url = f"https://api.z-api.io/instances/{ZAPI_INSTANCE_ID}/token/{ZAPI_TOKEN}/send-text"
-    headers = {"Content-Type": "application/json"}
+    headers = {
+        "Content-Type": "application/json",
+        "Client-Token": ZAPI_TOKEN
+    }
     payload = {
         "phone": numero_limpo,
         "message": mensagem
