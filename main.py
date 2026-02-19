@@ -1,26 +1,28 @@
 import os
 import json
 import httpx
+import redis
 from fastapi import FastAPI, Request
 from anthropic import Anthropic
 
 # ============================================================
 # CONFIGURAÇÃO
 # ============================================================
-ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY")
-ZAPI_INSTANCE_ID = os.environ.get("ZAPI_INSTANCE_ID")
-ZAPI_TOKEN = os.environ.get("ZAPI_TOKEN")
-ZAPI_CLIENT_TOKEN = os.environ.get("ZAPI_CLIENT_TOKEN")
+ANTHROPIC_API_KEY   = os.environ.get("ANTHROPIC_API_KEY")
+ZAPI_INSTANCE_ID    = os.environ.get("ZAPI_INSTANCE_ID")
+ZAPI_TOKEN          = os.environ.get("ZAPI_TOKEN")
+ZAPI_CLIENT_TOKEN   = os.environ.get("ZAPI_CLIENT_TOKEN")
+REDIS_URL           = os.environ.get("REDIS_URL")
 
 client = Anthropic(api_key=ANTHROPIC_API_KEY)
-app = FastAPI()
+app    = FastAPI()
 
 # ============================================================
-# MEMÓRIA DAS CONVERSAS
-# Guarda o histórico de cada aluno pelo número de telefone.
-# Em produção, substitua por um banco de dados (Redis ou PostgreSQL).
+# CONEXÃO COM REDIS
+# O histórico de cada aluno fica salvo pelo número de telefone.
+# Nunca se perde, mesmo se o servidor reiniciar.
 # ============================================================
-conversas: dict[str, list] = {}
+r = redis.from_url(REDIS_URL, decode_responses=True)
 
 # ============================================================
 # SYSTEM PROMPT — Personalidade e protocolo do Coach Run
@@ -111,22 +113,35 @@ TOM E FORMATO PARA WHATSAPP:
 """
 
 # ============================================================
-# FUNÇÕES AUXILIARES
+# FUNÇÕES DE HISTÓRICO COM REDIS
 # ============================================================
 
+HISTORICO_LIMITE = 40  # máximo de mensagens guardadas por aluno
+
 def obter_historico(telefone: str) -> list:
-    """Retorna o histórico de conversa do aluno. Limita a 40 mensagens para não estourar o contexto."""
-    if telefone not in conversas:
-        conversas[telefone] = []
-    return conversas[telefone][-40:]
+    """Busca o histórico do aluno no Redis."""
+    dados = r.get(f"historico:{telefone}")
+    if not dados:
+        return []
+    historico = json.loads(dados)
+    return historico[-HISTORICO_LIMITE:]
+
+
+def salvar_historico(telefone: str, historico: list):
+    """Salva o histórico do aluno no Redis. Sem expiração — guarda para sempre."""
+    r.set(f"historico:{telefone}", json.dumps(historico))
 
 
 def salvar_mensagem(telefone: str, role: str, conteudo: str):
-    """Salva uma mensagem no histórico do aluno."""
-    if telefone not in conversas:
-        conversas[telefone] = []
-    conversas[telefone].append({"role": role, "content": conteudo})
+    """Adiciona uma mensagem ao histórico do aluno no Redis."""
+    historico = obter_historico(telefone)
+    historico.append({"role": role, "content": conteudo})
+    salvar_historico(telefone, historico)
 
+
+# ============================================================
+# FUNÇÕES AUXILIARES
+# ============================================================
 
 async def enviar_whatsapp(telefone: str, mensagem: str):
     """Envia mensagem de volta para o aluno via Z-API."""
@@ -137,8 +152,8 @@ async def enviar_whatsapp(telefone: str, mensagem: str):
 
     url = f"https://api.z-api.io/instances/{ZAPI_INSTANCE_ID}/token/{ZAPI_TOKEN}/send-text"
     headers = {
-    "Content-Type": "application/json",
-    "Client-Token": ZAPI_CLIENT_TOKEN
+        "Content-Type": "application/json",
+        "Client-Token": ZAPI_CLIENT_TOKEN
     }
     payload = {
         "phone": numero_limpo,
@@ -179,37 +194,31 @@ def status():
 
 @app.post("/webhook")
 async def webhook(request: Request):
+    """Recebe as mensagens do WhatsApp via Z-API."""
     try:
         dados = await request.json()
-        print(f"DADOS RECEBIDOS: {dados}")
 
         if dados.get("type") != "ReceivedCallback":
-            print(f"IGNORADO - tipo: {dados.get('type')}")
             return {"status": "ignorado"}
 
         if dados.get("fromMe"):
-            print("IGNORADO - fromMe")
             return {"status": "ignorado"}
 
         if dados.get("isGroup"):
-            print("IGNORADO - grupo")
             return {"status": "ignorado"}
 
         telefone = dados.get("phone", "")
-        texto = dados.get("text", {}).get("message", "")
-        print(f"TELEFONE: {telefone} | TEXTO: {texto}")
+        texto    = dados.get("text", {}).get("message", "")
 
         if not telefone or not texto:
-            print("IGNORADO - sem telefone ou texto")
             return {"status": "ignorado"}
 
-        print(f"CHAMANDO CLAUDE para {telefone}")
+        print(f"Mensagem de {telefone}: {texto}")
+
         resposta = await chamar_claude(telefone, texto)
-        print(f"RESPOSTA CLAUDE: {resposta[:100]}")
-
         await enviar_whatsapp(telefone, resposta)
-        print(f"MENSAGEM ENVIADA para {telefone}")
 
+        print(f"Resposta enviada para {telefone}")
         return {"status": "ok"}
 
     except Exception as e:
