@@ -2,7 +2,9 @@ import os
 import json
 import httpx
 import redis
-from fastapi import FastAPI, Request
+import secrets
+from fastapi import FastAPI, Request, Depends, HTTPException
+from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from anthropic import Anthropic
 
 # ============================================================
@@ -13,9 +15,24 @@ ZAPI_INSTANCE_ID    = os.environ.get("ZAPI_INSTANCE_ID")
 ZAPI_TOKEN          = os.environ.get("ZAPI_TOKEN")
 ZAPI_CLIENT_TOKEN   = os.environ.get("ZAPI_CLIENT_TOKEN")
 REDIS_URL           = os.environ.get("REDIS_URL")
+ADMIN_USER          = os.environ.get("ADMIN_USER", "admin")
+ADMIN_PASS          = os.environ.get("ADMIN_PASS", "trocame123")
 
 client = Anthropic(api_key=ANTHROPIC_API_KEY)
 app    = FastAPI()
+security = HTTPBasic()
+
+def verificar_admin(credentials: HTTPBasicCredentials = Depends(security)):
+    """Verifica login e senha das rotas administrativas."""
+    usuario_ok = secrets.compare_digest(credentials.username.encode(), ADMIN_USER.encode())
+    senha_ok   = secrets.compare_digest(credentials.password.encode(), ADMIN_PASS.encode())
+    if not (usuario_ok and senha_ok):
+        raise HTTPException(
+            status_code=401,
+            detail="Acesso negado",
+            headers={"WWW-Authenticate": "Basic"}
+        )
+    return credentials.username
 
 # ============================================================
 # CONEXÃO COM REDIS
@@ -190,6 +207,44 @@ async def chamar_claude(telefone: str, mensagem_usuario: str) -> str:
 def status():
     """Rota de verificação — confirma que o servidor está no ar."""
     return {"status": "Coach Run online 🏃"}
+
+
+@app.get("/alunos")
+def listar_alunos(admin: str = Depends(verificar_admin)):
+    """Lista todos os alunos que já conversaram com o Coach Run."""
+    chaves = r.keys("historico:*")
+    alunos = []
+    for chave in chaves:
+        telefone = chave.replace("historico:", "")
+        historico = obter_historico(telefone)
+        total_mensagens = len(historico)
+        ultima_mensagem = historico[-1]["content"][:60] + "..." if historico else ""
+        alunos.append({
+            "telefone": telefone,
+            "total_mensagens": total_mensagens,
+            "ultima_mensagem": ultima_mensagem
+        })
+    return {"total_alunos": len(alunos), "alunos": alunos}
+
+
+@app.get("/historico/{telefone}")
+def ver_historico(telefone: str, admin: str = Depends(verificar_admin)):
+    """Retorna o histórico completo de conversa de um aluno."""
+    historico = obter_historico(telefone)
+    if not historico:
+        return {"erro": "Aluno não encontrado ou sem histórico"}
+    return {
+        "telefone": telefone,
+        "total_mensagens": len(historico),
+        "conversa": historico
+    }
+
+
+@app.delete("/historico/{telefone}")
+def apagar_historico(telefone: str, admin: str = Depends(verificar_admin)):
+    """Apaga o histórico de um aluno — útil para resetar a conversa."""
+    r.delete(f"historico:{telefone}")
+    return {"status": "ok", "mensagem": f"Histórico de {telefone} apagado."}
 
 
 @app.post("/webhook")
