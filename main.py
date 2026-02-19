@@ -168,10 +168,36 @@ def status():
 
 @app.post("/webhook")
 async def webhook(request: Request):
+    """
+    Recebe as mensagens do WhatsApp via Evolution API.
+    A Evolution API envia um JSON com os dados da mensagem.
+    """
     try:
-        body = await request.body()
-        print("BODY COMPLETO:", body.decode("utf-8"))
+        dados = await request.json()
+
+        # Ignora eventos que não são mensagens recebidas
+        # A Z-API envia type "ReceivedCallback" para mensagens recebidas
+        tipo = dados.get("type", "")
+        if tipo != "ReceivedCallback":
+            return {"status": "ignorado"}
+
+        # Ignora mensagens enviadas pelo próprio bot
+        if dados.get("fromMe"):
+            return {"status": "ignorado"}
+
+        # Extrai o número e o texto da mensagem
+        telefone = dados.get("phone", "")
+        texto = dados.get("text", {}).get("message", "")
+
+        if not telefone or not texto:
+            return {"status": "ignorado"}
+
+        # Chama o Claude e envia a resposta
+        resposta = await chamar_claude(telefone, texto)
+        await enviar_whatsapp(telefone, resposta)
+
         return {"status": "ok"}
+
     except Exception as e:
-        print(f"Erro: {e}")
-        return {"status": "erro"}
+        print(f"Erro no webhook: {e}")
+        return {"status": "erro", "detalhe": str(e)}
