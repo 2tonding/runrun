@@ -351,13 +351,26 @@ async def chamar_claude(telefone: str, mensagem_usuario: str) -> str:
     # Busca dados do Strava se o aluno tiver conectado
     contexto_strava = ""
     token = obter_token_strava(telefone)
-    print(f"TOKEN STRAVA: {token is not None}")  # ADD ESTA LINHA
     if token:
         atividades = await buscar_atividades_strava(telefone, dias=7)
-        print(f"ATIVIDADES ENCONTRADAS: {len(atividades)}")  # ADD ESTA LINHA
         if atividades:
             contexto_strava = "\n\n" + formatar_atividades_para_claude(atividades)
-            print(f"CONTEXTO STRAVA: {contexto_strava[:200]}")  # ADD ESTA LINHA
+
+    # Injeta os dados do Strava no system prompt se houver
+    system = SYSTEM_PROMPT
+    if contexto_strava:
+        system += f"\n\nDADOS ATUAIS DO STRAVA DO ALUNO:{contexto_strava}"
+
+    resposta = client.messages.create(
+        model="claude-haiku-4-5-20251001",
+        max_tokens=1024,
+        system=system,
+        messages=historico
+    )
+
+    texto_resposta = resposta.content[0].text
+    salvar_mensagem(telefone, "assistant", texto_resposta)
+    return texto_resposta
 
 # ============================================================
 # ROTAS PÚBLICAS
@@ -514,7 +527,7 @@ def ver_conversa(telefone: str, admin: str = Depends(verificar_admin)):
         <h2>💬 Conversa com {telefone}</h2>
         <div class="total">{len(historico)} mensagens</div>
         <div class="chat">{msgs}</div>
-    </div>"""
+    </div>""
 
     return HTMLResponse(base_html(telefone, conteudo))
 
