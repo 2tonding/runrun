@@ -10,6 +10,7 @@ from anthropic import Anthropic
 ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY")
 ZAPI_INSTANCE_ID = os.environ.get("ZAPI_INSTANCE_ID")
 ZAPI_TOKEN = os.environ.get("ZAPI_TOKEN")
+ZAPI_CLIENT_TOKEN = os.environ.get("ZAPI_CLIENT_TOKEN")
 
 client = Anthropic(api_key=ANTHROPIC_API_KEY)
 app = FastAPI()
@@ -136,8 +137,8 @@ async def enviar_whatsapp(telefone: str, mensagem: str):
 
     url = f"https://api.z-api.io/instances/{ZAPI_INSTANCE_ID}/token/{ZAPI_TOKEN}/send-text"
     headers = {
-        "Content-Type": "application/json",
-        "Client-Token": ZAPI_TOKEN
+    "Content-Type": "application/json",
+    "Client-Token": ZAPI_CLIENT_TOKEN
     }
     payload = {
         "phone": numero_limpo,
