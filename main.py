@@ -8,9 +8,8 @@ from anthropic import Anthropic
 # CONFIGURAÇÃO
 # ============================================================
 ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY")
-EVOLUTION_API_URL = os.environ.get("EVOLUTION_API_URL")   # ex: http://seu-evolution.railway.app
-EVOLUTION_API_KEY = os.environ.get("EVOLUTION_API_KEY")
-EVOLUTION_INSTANCE  = os.environ.get("EVOLUTION_INSTANCE") # nome da instância criada na Evolution API
+ZAPI_INSTANCE_ID = os.environ.get("ZAPI_INSTANCE_ID")
+ZAPI_TOKEN = os.environ.get("ZAPI_TOKEN")
 
 client = Anthropic(api_key=ANTHROPIC_API_KEY)
 app = FastAPI()
@@ -129,12 +128,12 @@ def salvar_mensagem(telefone: str, role: str, conteudo: str):
 
 
 async def enviar_whatsapp(telefone: str, mensagem: str):
-    """Envia mensagem de volta para o aluno via Evolution API."""
-    url = f"{EVOLUTION_API_URL}/message/sendText/{EVOLUTION_INSTANCE}"
-    headers = {"apikey": EVOLUTION_API_KEY, "Content-Type": "application/json"}
+    """Envia mensagem de volta para o aluno via Z-API."""
+    url = f"https://api.z-api.io/instances/{ZAPI_INSTANCE_ID}/token/{ZAPI_TOKEN}/send-text"
+    headers = {"Content-Type": "application/json"}
     payload = {
-        "number": telefone,
-        "text": mensagem
+        "phone": telefone,
+        "message": mensagem
     }
     async with httpx.AsyncClient(timeout=30) as http:
         await http.post(url, headers=headers, json=payload)
@@ -176,21 +175,19 @@ async def webhook(request: Request):
     try:
         dados = await request.json()
 
-        # Ignora eventos que não são mensagens de texto recebidas
-        evento = dados.get("event", "")
-        if evento != "messages.upsert":
+        # Ignora eventos que não são mensagens recebidas
+        # A Z-API envia type "ReceivedCallback" para mensagens recebidas
+        tipo = dados.get("type", "")
+        if tipo != "ReceivedCallback":
             return {"status": "ignorado"}
 
-        mensagem_data = dados.get("data", {})
-        
         # Ignora mensagens enviadas pelo próprio bot
-        if mensagem_data.get("key", {}).get("fromMe"):
+        if dados.get("fromMe"):
             return {"status": "ignorado"}
 
         # Extrai o número e o texto da mensagem
-        telefone = mensagem_data.get("key", {}).get("remoteJid", "").replace("@s.whatsapp.net", "")
-        texto = mensagem_data.get("message", {}).get("conversation") or \
-                mensagem_data.get("message", {}).get("extendedTextMessage", {}).get("text", "")
+        telefone = dados.get("phone", "")
+        texto = dados.get("text", {}).get("message", "")
 
         if not telefone or not texto:
             return {"status": "ignorado"}
