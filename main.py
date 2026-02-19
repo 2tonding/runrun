@@ -169,8 +169,8 @@ def status():
 @app.post("/webhook")
 async def webhook(request: Request):
     try:
-        dados = await request.json()
-        print(f"WEBHOOK RECEBIDO: {json.dumps(dados, indent=2)}")
+        body = await request.body()
+        print("BODY COMPLETO:", body.decode("utf-8"))
         return {"status": "ok"}
     except Exception as e:
         print(f"Erro: {e}")
