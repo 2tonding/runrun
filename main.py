@@ -527,7 +527,7 @@ def ver_conversa(telefone: str, admin: str = Depends(verificar_admin)):
         <h2>💬 Conversa com {telefone}</h2>
         <div class="total">{len(historico)} mensagens</div>
         <div class="chat">{msgs}</div>
-    </div>""
+    </div>"""
 
     return HTMLResponse(base_html(telefone, conteudo))
 
