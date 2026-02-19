@@ -7,24 +7,28 @@ from fastapi import FastAPI, Request, Depends, HTTPException
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from anthropic import Anthropic
+from datetime import datetime, timedelta
 
 # ============================================================
 # CONFIGURAÇÃO
 # ============================================================
-ANTHROPIC_API_KEY   = os.environ.get("ANTHROPIC_API_KEY")
-ZAPI_INSTANCE_ID    = os.environ.get("ZAPI_INSTANCE_ID")
-ZAPI_TOKEN          = os.environ.get("ZAPI_TOKEN")
-ZAPI_CLIENT_TOKEN   = os.environ.get("ZAPI_CLIENT_TOKEN")
-REDIS_URL           = os.environ.get("REDIS_URL")
-ADMIN_USER          = os.environ.get("ADMIN_USER", "admin")
-ADMIN_PASS          = os.environ.get("ADMIN_PASS", "trocame123")
+ANTHROPIC_API_KEY    = os.environ.get("ANTHROPIC_API_KEY")
+ZAPI_INSTANCE_ID     = os.environ.get("ZAPI_INSTANCE_ID")
+ZAPI_TOKEN           = os.environ.get("ZAPI_TOKEN")
+ZAPI_CLIENT_TOKEN    = os.environ.get("ZAPI_CLIENT_TOKEN")
+REDIS_URL            = os.environ.get("REDIS_URL")
+ADMIN_USER           = os.environ.get("ADMIN_USER", "admin")
+ADMIN_PASS           = os.environ.get("ADMIN_PASS", "trocame123")
+STRAVA_CLIENT_ID     = os.environ.get("STRAVA_CLIENT_ID")
+STRAVA_CLIENT_SECRET = os.environ.get("STRAVA_CLIENT_SECRET")
+BASE_URL             = os.environ.get("BASE_URL", "https://runrun-production-79c5.up.railway.app")
 
 client   = Anthropic(api_key=ANTHROPIC_API_KEY)
 app      = FastAPI()
 security = HTTPBasic()
 
 # ============================================================
-# AUTENTICAÇÃO
+# AUTENTICAÇÃO ADMIN
 # ============================================================
 
 def verificar_admin(credentials: HTTPBasicCredentials = Depends(security)):
@@ -78,7 +82,13 @@ Perguntas da anamnese (em ordem, uma por vez):
 - Tem alguma condição de saúde com restrição médica?
 - Faz musculação ou treino de força complementar?
 
-2. ZONAS DE TREINO — OBRIGATÓRIO ANTES DA PLANILHA
+2. CONVITE PARA CONECTAR O STRAVA
+Após a anamnese, convide o aluno a conectar o Strava. Explique que isso permite analisar
+os treinos reais automaticamente, sem precisar reportar manualmente.
+Envie o link de conexão que será fornecido no contexto da conversa quando disponível.
+Se o aluno não quiser conectar, tudo bem — continue sem o Strava.
+
+3. ZONAS DE TREINO — OBRIGATÓRIO ANTES DA PLANILHA
 Antes de qualquer planilha, as zonas de treino precisam ser estabelecidas.
 Se o aluno não tem referência de pace ou frequência cardíaca, prescreva um teste:
 - Iniciantes: Teste de 2km (correr 2km no máximo esforço sustentável e registrar o tempo)
@@ -92,7 +102,7 @@ Z3 — Moderado: X:XX – X:XX/km
 Z4 — Limiar: X:XX – X:XX/km
 Z5 — Máximo: pace < X:XX/km
 
-3. PLANO E ENTREGA SEMANAL
+4. PLANO E ENTREGA SEMANAL
 Após a anamnese e as zonas estabelecidas, monte internamente o plano completo (macrociclo de 8 a 24 semanas).
 MAS entregue APENAS a semana atual ao aluno. Nunca entregue o plano inteiro.
 Mencione o horizonte para criar expectativa: "Essa é sua Semana 1 de 16."
@@ -102,7 +112,21 @@ Formato de entrega da semana:
 [dia]: [tipo de treino] — [distância/duração] em [zona] (pace: X:XX/km)
 💡 Dica da semana: [insight específico]
 
-4. ACOMPANHAMENTO CONTÍNUO
+5. ANÁLISE DOS TREINOS DO STRAVA
+Quando dados do Strava forem fornecidos no contexto, analise:
+- O aluno completou os treinos planejados?
+- O pace executado está dentro das zonas corretas?
+- O volume semanal está adequado?
+- Há sinais de overtraining ou subtreinamento?
+Ajuste a próxima semana com base nesses dados reais.
+
+Formato de análise:
+📊 ANÁLISE DA SEMANA
+✅ O que foi bem: [pontos positivos]
+⚠️ Atenção: [pontos de melhora]
+📈 Ajuste para próxima semana: [mudanças no plano]
+
+6. ACOMPANHAMENTO CONTÍNUO
 A cada semana, pergunte como foram os treinos antes de entregar a próxima semana.
 Ajuste a planilha com base no feedback. Monitore sinais de overtraining:
 - Treinos fáceis parecendo difíceis
@@ -110,7 +134,7 @@ Ajuste a planilha com base no feedback. Monitore sinais de overtraining:
 - Falta de motivação
 - Dores que não passam
 
-5. RETESTES PERIÓDICOS
+7. RETESTES PERIÓDICOS
 Proponha novo teste a cada 4-6 semanas, na transição entre fases, ou quando o aluno demonstrar
 evolução significativa. Contextualize sempre: explique por que o reteste é importante naquele momento.
 
@@ -145,6 +169,7 @@ header h1 { font-size: 18px; }
 a { color: #4f46e5; text-decoration: none; }
 a:hover { text-decoration: underline; }
 .badge { display: inline-block; background: #e0e7ff; color: #4f46e5; border-radius: 20px; padding: 2px 10px; font-size: 12px; margin-left: 8px; }
+.badge-green { background: #dcfce7; color: #16a34a; }
 .aluno-row { display: flex; justify-content: space-between; align-items: center; padding: 12px 0; border-bottom: 1px solid #f0f0f0; }
 .aluno-row:last-child { border-bottom: none; }
 .aluno-info { font-size: 12px; color: #999; margin-top: 4px; max-width: 480px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -161,6 +186,7 @@ a:hover { text-decoration: underline; }
 .balao { padding: 10px 14px; border-radius: 16px; font-size: 14px; line-height: 1.6; }
 .aluno .balao { background: #dcf8c6; border-bottom-right-radius: 4px; }
 .bot .balao { background: #f8f8f8; border-bottom-left-radius: 4px; box-shadow: 0 1px 2px rgba(0,0,0,0.08); }
+.strava-box { background: #fff7ed; border: 1px solid #fed7aa; border-radius: 8px; padding: 12px 16px; margin-bottom: 12px; font-size: 13px; }
 """
 
 def base_html(titulo: str, conteudo: str) -> str:
@@ -169,13 +195,13 @@ def base_html(titulo: str, conteudo: str) -> str:
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>{titulo} — Coach Run</title>
+    <title>{titulo} — CorreAI</title>
     <style>{CSS}</style>
 </head>
 <body>
     <header>
         <span>🏃</span>
-        <h1>Coach Run — Painel Admin</h1>
+        <h1>CorreAI — Painel Admin</h1>
     </header>
     <div class="container">
         {conteudo}
@@ -204,6 +230,103 @@ def salvar_mensagem(telefone: str, role: str, conteudo: str):
     salvar_historico(telefone, historico)
 
 # ============================================================
+# FUNÇÕES DO STRAVA
+# ============================================================
+
+def gerar_link_strava(telefone: str) -> str:
+    """Gera o link de autorização do Strava para o aluno."""
+    redirect_uri = f"{BASE_URL}/strava/callback"
+    return (
+        f"https://www.strava.com/oauth/authorize"
+        f"?client_id={STRAVA_CLIENT_ID}"
+        f"&redirect_uri={redirect_uri}"
+        f"&response_type=code"
+        f"&approval_prompt=auto"
+        f"&scope=activity:read_all"
+        f"&state={telefone}"
+    )
+
+def salvar_token_strava(telefone: str, token_data: dict):
+    """Salva o token do Strava do aluno no Redis."""
+    r.set(f"strava:{telefone}", json.dumps(token_data))
+
+def obter_token_strava(telefone: str) -> dict | None:
+    """Busca o token do Strava do aluno."""
+    dados = r.get(f"strava:{telefone}")
+    return json.loads(dados) if dados else None
+
+async def renovar_token_se_necessario(telefone: str) -> dict | None:
+    """Renova o token do Strava se estiver expirado."""
+    token_data = obter_token_strava(telefone)
+    if not token_data:
+        return None
+
+    # Verifica se o token expirou
+    if datetime.now().timestamp() >= token_data.get("expires_at", 0):
+        async with httpx.AsyncClient() as http:
+            response = await http.post("https://www.strava.com/oauth/token", data={
+                "client_id":     STRAVA_CLIENT_ID,
+                "client_secret": STRAVA_CLIENT_SECRET,
+                "grant_type":    "refresh_token",
+                "refresh_token": token_data["refresh_token"]
+            })
+            if response.status_code == 200:
+                novo_token = response.json()
+                salvar_token_strava(telefone, novo_token)
+                return novo_token
+        return None
+
+    return token_data
+
+async def buscar_atividades_strava(telefone: str, dias: int = 7) -> list:
+    """Busca as atividades de corrida do aluno nos últimos X dias."""
+    token_data = await renovar_token_se_necessario(telefone)
+    if not token_data:
+        return []
+
+    desde = int((datetime.now() - timedelta(days=dias)).timestamp())
+    headers = {"Authorization": f"Bearer {token_data['access_token']}"}
+
+    async with httpx.AsyncClient() as http:
+        response = await http.get(
+            "https://www.strava.com/api/v3/athlete/activities",
+            headers=headers,
+            params={"after": desde, "per_page": 20}
+        )
+        if response.status_code != 200:
+            return []
+
+        atividades = response.json()
+        # Filtra apenas corridas
+        return [a for a in atividades if a.get("type") in ("Run", "TrailRun", "VirtualRun")]
+
+def formatar_atividades_para_claude(atividades: list) -> str:
+    """Formata as atividades do Strava em texto para o Claude analisar."""
+    if not atividades:
+        return ""
+
+    linhas = ["📊 TREINOS RECENTES NO STRAVA:"]
+    for a in atividades:
+        data       = a.get("start_date_local", "")[:10]
+        nome       = a.get("name", "Corrida")
+        distancia  = round(a.get("distance", 0) / 1000, 2)
+        duracao    = int(a.get("moving_time", 0) / 60)
+        pace_seg   = a.get("moving_time", 0) / (a.get("distance", 1) / 1000)
+        pace_min   = int(pace_seg // 60)
+        pace_sec   = int(pace_seg % 60)
+        fc_media   = a.get("average_heartrate", "—")
+        elevacao   = round(a.get("total_elevation_gain", 0))
+
+        linhas.append(
+            f"• {data} — {nome}: {distancia}km em {duracao}min "
+            f"| Pace: {pace_min}:{pace_sec:02d}/km "
+            f"| FC média: {fc_media} bpm "
+            f"| Elevação: {elevacao}m"
+        )
+
+    return "\n".join(linhas)
+
+# ============================================================
 # FUNÇÕES AUXILIARES
 # ============================================================
 
@@ -225,10 +348,23 @@ async def chamar_claude(telefone: str, mensagem_usuario: str) -> str:
     salvar_mensagem(telefone, "user", mensagem_usuario)
     historico = obter_historico(telefone)
 
+    # Busca dados do Strava se o aluno tiver conectado
+    contexto_strava = ""
+    token = obter_token_strava(telefone)
+    if token:
+        atividades = await buscar_atividades_strava(telefone, dias=7)
+        if atividades:
+            contexto_strava = "\n\n" + formatar_atividades_para_claude(atividades)
+
+    # Injeta os dados do Strava no system prompt se houver
+    system = SYSTEM_PROMPT
+    if contexto_strava:
+        system += f"\n\nDADOS ATUAIS DO STRAVA DO ALUNO:{contexto_strava}"
+
     resposta = client.messages.create(
         model="claude-haiku-4-5-20251001",
         max_tokens=1024,
-        system=SYSTEM_PROMPT,
+        system=system,
         messages=historico
     )
 
@@ -242,10 +378,60 @@ async def chamar_claude(telefone: str, mensagem_usuario: str) -> str:
 
 @app.get("/")
 def status():
-    return {"status": "Coach Run online 🏃"}
+    return {"status": "CorreAI online 🏃"}
+
+@app.get("/strava/conectar/{telefone}")
+def conectar_strava(telefone: str):
+    """Redireciona o aluno para autorizar o Strava."""
+    link = gerar_link_strava(telefone)
+    return RedirectResponse(url=link)
+
+@app.get("/strava/callback")
+async def strava_callback(code: str, state: str):
+    """
+    Recebe o código do Strava após o aluno autorizar.
+    Troca o código pelo token e salva no Redis.
+    O 'state' contém o número de telefone do aluno.
+    """
+    telefone = state
+
+    async with httpx.AsyncClient() as http:
+        response = await http.post("https://www.strava.com/oauth/token", data={
+            "client_id":     STRAVA_CLIENT_ID,
+            "client_secret": STRAVA_CLIENT_SECRET,
+            "code":          code,
+            "grant_type":    "authorization_code"
+        })
+
+    if response.status_code != 200:
+        return HTMLResponse("<h2>Erro ao conectar com o Strava. Tente novamente.</h2>")
+
+    token_data = response.json()
+    salvar_token_strava(telefone, token_data)
+
+    atleta = token_data.get("athlete", {})
+    nome   = atleta.get("firstname", "atleta")
+
+    # Avisa o aluno no WhatsApp que a conexão foi feita
+    await enviar_whatsapp(
+        telefone,
+        f"✅ Strava conectado com sucesso, {nome}! "
+        f"Agora consigo analisar seus treinos automaticamente e ajustar seu plano com base no que você realmente fez. 🏃"
+    )
+
+    return HTMLResponse(f"""
+    <html><body style="font-family:Arial;text-align:center;padding:60px;background:#f0f2f5;">
+        <div style="background:white;border-radius:16px;padding:40px;max-width:400px;margin:0 auto;box-shadow:0 2px 8px rgba(0,0,0,0.1)">
+            <div style="font-size:48px">✅</div>
+            <h2 style="margin:16px 0 8px">Strava conectado!</h2>
+            <p style="color:#888">Olá, {nome}! Seu Strava foi conectado com sucesso.<br>
+            Pode fechar esta página e voltar para o WhatsApp.</p>
+        </div>
+    </body></html>
+    """)
 
 # ============================================================
-# ROTAS ADMINISTRATIVAS — protegidas com login e senha
+# ROTAS ADMINISTRATIVAS
 # ============================================================
 
 @app.get("/admin", response_class=HTMLResponse)
@@ -258,12 +444,16 @@ def painel_admin(admin: str = Depends(verificar_admin)):
         historico = obter_historico(telefone)
         total = len(historico)
         ultima = historico[-1]["content"][:80] + "..." if historico else "—"
+        tem_strava = "✅ Strava" if obter_token_strava(telefone) else ""
+        badge_strava = f'<span class="badge badge-green">{tem_strava}</span>' if tem_strava else ""
+
         rows += f"""
         <div class="aluno-row">
             <div>
                 <div>
                     <a href="/admin/conversa/{telefone}">📱 {telefone}</a>
                     <span class="badge">{total} msgs</span>
+                    {badge_strava}
                 </div>
                 <div class="aluno-info">{ultima}</div>
             </div>
@@ -286,18 +476,36 @@ def painel_admin(admin: str = Depends(verificar_admin)):
 
 @app.get("/admin/conversa/{telefone}", response_class=HTMLResponse)
 def ver_conversa(telefone: str, admin: str = Depends(verificar_admin)):
-    """Visualiza a conversa completa de um aluno no estilo WhatsApp."""
+    """Visualiza a conversa completa de um aluno."""
     historico = obter_historico(telefone)
+    token_strava = obter_token_strava(telefone)
+
+    strava_info = ""
+    if token_strava:
+        atleta = token_strava.get("athlete", {})
+        nome_atleta = f"{atleta.get('firstname', '')} {atleta.get('lastname', '')}".strip()
+        strava_info = f"""
+        <div class="strava-box">
+            🟠 <strong>Strava conectado</strong> — {nome_atleta}
+        </div>"""
+    else:
+        link_strava = f"{BASE_URL}/strava/conectar/{telefone}"
+        strava_info = f"""
+        <div class="strava-box">
+            ⚠️ Strava não conectado —
+            <a href="{link_strava}" target="_blank">Link de conexão para enviar ao aluno</a>
+        </div>"""
 
     if not historico:
         conteudo = f"""
         <a class="back" href="/admin">← Voltar</a>
+        {strava_info}
         <div class="card"><p>Nenhuma conversa encontrada para {telefone}.</p></div>"""
         return HTMLResponse(base_html(telefone, conteudo))
 
     msgs = ""
     for msg in historico:
-        role = msg["role"]
+        role  = msg["role"]
         texto = msg["content"].replace("\n", "<br>")
         if role == "user":
             msgs += f"""
@@ -308,12 +516,13 @@ def ver_conversa(telefone: str, admin: str = Depends(verificar_admin)):
         else:
             msgs += f"""
             <div class="msg bot">
-                <div class="label">🏃 Coach Run</div>
+                <div class="label">🏃 CorreAI</div>
                 <div class="balao">{texto}</div>
             </div>"""
 
     conteudo = f"""
     <a class="back" href="/admin">← Voltar para lista de alunos</a>
+    {strava_info}
     <div class="card">
         <h2>💬 Conversa com {telefone}</h2>
         <div class="total">{len(historico)} mensagens</div>
@@ -350,6 +559,17 @@ async def webhook(request: Request):
 
         if not telefone or not texto:
             return {"status": "ignorado"}
+
+        # Se o aluno pedir para conectar o Strava, envia o link
+        if any(p in texto.lower() for p in ["strava", "conectar strava", "ligar strava"]):
+            if not obter_token_strava(telefone):
+                link = f"{BASE_URL}/strava/conectar/{telefone}"
+                await enviar_whatsapp(
+                    telefone,
+                    f"🟠 Para conectar seu Strava, acesse este link:\n{link}\n\n"
+                    f"Após autorizar, seus treinos serão analisados automaticamente!"
+                )
+                return {"status": "ok"}
 
         print(f"Mensagem de {telefone}: {texto}")
         resposta = await chamar_claude(telefone, texto)
