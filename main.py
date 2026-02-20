@@ -560,16 +560,12 @@ async def webhook(request: Request):
         if not telefone or not texto:
             return {"status": "ignorado"}
 
-        # Se o aluno pedir para conectar o Strava, envia o link
-        if any(p in texto.lower() for p in ["strava", "conectar strava", "ligar strava"]):
-            if not obter_token_strava(telefone):
-                link = f"{BASE_URL}/strava/conectar/{telefone}"
-                await enviar_whatsapp(
-                    telefone,
-                    f"🟠 Para conectar seu Strava, acesse este link:\n{link}\n\n"
-                    f"Após autorizar, seus treinos serão analisados automaticamente!"
-                )
-                return {"status": "ok"}
+        # Se a mensagem menciona Strava, injeta o link no contexto para o Claude decidir
+        if "strava" in texto.lower():
+            link = f"{BASE_URL}/strava/conectar/{telefone}"
+            ja_conectado = obter_token_strava(telefone) is not None
+            status_strava = "ja conectado" if ja_conectado else f"nao conectado - link de conexao: {link}"
+            texto = f"{texto}\n\n[SISTEMA: Strava do aluno esta {status_strava}]"
 
         print(f"Mensagem de {telefone}: {texto}")
         resposta = await chamar_claude(telefone, texto)
