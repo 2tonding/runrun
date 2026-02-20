@@ -51,7 +51,7 @@ r = redis.from_url(REDIS_URL, decode_responses=True)
 # SYSTEM PROMPT
 # ============================================================
 SYSTEM_PROMPT = """
-Voce e o Marcos Mark, treinador de corrida com mais de 15 anos de experiencia.
+Voce e o Coach Run, treinador de corrida com mais de 15 anos de experiencia.
 Seu estilo e direto, descontraido e humano — como um amigo que entende muito de corrida.
 Voce nao e um formulario. Voce e um treinador de verdade.
 
@@ -423,20 +423,20 @@ async def chamar_claude(telefone: str, mensagem_usuario: str) -> str:
     token = obter_token_strava(telefone)
     print(f"STRAVA TOKEN ENCONTRADO: {token is not None}")
     if token:
-        atividades = await buscar_atividades_strava(telefone, dias=7)
+        atividades = await buscar_atividades_strava(telefone, dias=365)
         print(f"STRAVA ATIVIDADES: {len(atividades)}")
         if atividades:
             contexto_strava = "\n\n" + formatar_atividades_para_claude(atividades)
             print(f"STRAVA CONTEXTO GERADO: {len(contexto_strava)} chars")
         else:
-            print("STRAVA: nenhuma atividade encontrada nos ultimos 7 dias")
+            print("STRAVA: nenhuma atividade encontrada nos ultimos 365 dias")
 
     # Injeta data atual e dados do Strava no system prompt
     hoje = datetime.now().strftime("%d/%m/%Y")
     dia_semana = ["segunda-feira","terca-feira","quarta-feira","quinta-feira","sexta-feira","sabado","domingo"][datetime.now().weekday()]
     system = SYSTEM_PROMPT + f"\n\nDATA ATUAL: {dia_semana}, {hoje}"
     if contexto_strava:
-        system += f"\n\nDADOS ATUAIS DO STRAVA DO ALUNO:{contexto_strava}"
+        system += f"\n\nDADOS DO STRAVA JA CARREGADOS E DISPONIVEIS — USE AGORA:\n{contexto_strava}\n\nINSTRUCAO: Os dados acima sao reais e ja estao disponiveis. Nao diga que esta aguardando sincronizacao ou que nao tem acesso. Analise os dados e responda com base neles imediatamente."
         print("STRAVA: contexto injetado no system prompt")
 
     resposta = client.messages.create(
@@ -649,11 +649,33 @@ async def webhook(request: Request):
         if not telefone or not texto:
             return {"status": "ignorado"}
 
-        # Se a mensagem menciona Strava, injeta o link no contexto para o Claude decidir
-        if "strava" in texto.lower():
-            link = f"{BASE_URL}/strava/conectar/{telefone}"
-            ja_conectado = obter_token_strava(telefone) is not None
-            status_strava = "ja conectado" if ja_conectado else f"nao conectado - link de conexao: {link}"
+        link_strava = f"{BASE_URL}/strava/conectar/{telefone}"
+        ja_conectado = obter_token_strava(telefone) is not None
+
+        # Detecta intencao de conectar o Strava
+        # Palavras que indicam que o aluno quer conectar
+        quer_conectar = any(p in texto.lower() for p in [
+            "sim", "quero", "pode", "claro", "bora", "vamos", "conectar", "strava", "vai", "ok", "s2", "isso"
+        ])
+
+        # Verifica se a ultima mensagem do bot falou sobre Strava
+        historico_atual = obter_historico(telefone)
+        ultima_msg_bot = ""
+        for msg in reversed(historico_atual):
+            if msg["role"] == "assistant":
+                ultima_msg_bot = msg["content"].lower()
+                break
+
+        bot_perguntou_strava = "strava" in ultima_msg_bot
+
+        # Se o bot perguntou sobre Strava e o aluno disse sim, envia o link direto
+        if bot_perguntou_strava and quer_conectar and not ja_conectado:
+            await enviar_whatsapp(telefone, f"Perfeito! Acessa esse link para conectar seu Strava:\n{link_strava}\n\nDepois que autorizar, volta aqui que ja analiso tudo!")
+            return {"status": "ok"}
+
+        # Injeta contexto do Strava para o Claude quando relevante
+        if "strava" in texto.lower() or ja_conectado:
+            status_strava = "ja conectado" if ja_conectado else f"nao conectado - link de conexao: {link_strava}"
             texto = f"{texto}\n\n[SISTEMA: Strava do aluno esta {status_strava}]"
 
         print(f"Mensagem de {telefone}: {texto}")
