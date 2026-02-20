@@ -410,7 +410,7 @@ async def chamar_claude(telefone: str, mensagem_usuario: str) -> str:
     token = obter_token_strava(telefone)
     print(f"STRAVA TOKEN ENCONTRADO: {token is not None}")
     if token:
-        atividades = await buscar_atividades_strava(telefone, dias=7)
+        atividades = await buscar_atividades_strava(telefone, dias=365)
         print(f"STRAVA ATIVIDADES: {len(atividades)}")
         if atividades:
             contexto_strava = "\n\n" + formatar_atividades_para_claude(atividades)
