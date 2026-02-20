@@ -351,15 +351,21 @@ async def chamar_claude(telefone: str, mensagem_usuario: str) -> str:
     # Busca dados do Strava se o aluno tiver conectado
     contexto_strava = ""
     token = obter_token_strava(telefone)
+    print(f"STRAVA TOKEN ENCONTRADO: {token is not None}")
     if token:
         atividades = await buscar_atividades_strava(telefone, dias=7)
+        print(f"STRAVA ATIVIDADES: {len(atividades)}")
         if atividades:
             contexto_strava = "\n\n" + formatar_atividades_para_claude(atividades)
+            print(f"STRAVA CONTEXTO GERADO: {len(contexto_strava)} chars")
+        else:
+            print("STRAVA: nenhuma atividade encontrada nos ultimos 7 dias")
 
     # Injeta os dados do Strava no system prompt se houver
     system = SYSTEM_PROMPT
     if contexto_strava:
         system += f"\n\nDADOS ATUAIS DO STRAVA DO ALUNO:{contexto_strava}"
+        print("STRAVA: contexto injetado no system prompt")
 
     resposta = client.messages.create(
         model="claude-haiku-4-5-20251001",
