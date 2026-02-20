@@ -278,8 +278,8 @@ async def renovar_token_se_necessario(telefone: str) -> dict | None:
 
     return token_data
 
-async def buscar_atividades_strava(telefone: str, dias: int = 7) -> list:
-    """Busca as atividades de corrida do aluno nos últimos X dias."""
+async def buscar_atividades_strava(telefone: str, dias: int = 365) -> list:
+    """Busca as atividades de corrida do aluno nos ultimos X dias."""
     token_data = await renovar_token_se_necessario(telefone)
     if not token_data:
         return []
@@ -287,41 +287,98 @@ async def buscar_atividades_strava(telefone: str, dias: int = 7) -> list:
     desde = int((datetime.now() - timedelta(days=dias)).timestamp())
     headers = {"Authorization": f"Bearer {token_data['access_token']}"}
 
-    async with httpx.AsyncClient() as http:
-        response = await http.get(
-            "https://www.strava.com/api/v3/athlete/activities",
-            headers=headers,
-            params={"after": desde, "per_page": 20}
-        )
-        if response.status_code != 200:
-            return []
+    todas_atividades = []
+    pagina = 1
 
-        atividades = response.json()
-        # Filtra apenas corridas
-        return [a for a in atividades if a.get("type") in ("Run", "TrailRun", "VirtualRun")]
+    async with httpx.AsyncClient() as http:
+        while True:
+            response = await http.get(
+                "https://www.strava.com/api/v3/athlete/activities",
+                headers=headers,
+                params={"after": desde, "per_page": 50, "page": pagina}
+            )
+            if response.status_code != 200:
+                break
+
+            atividades = response.json()
+            if not atividades:
+                break
+
+            corridas = [a for a in atividades if a.get("type") in ("Run", "TrailRun", "VirtualRun")]
+            todas_atividades.extend(corridas)
+            pagina += 1
+
+            # Limite de seguranca para nao buscar infinitamente
+            if len(atividades) < 50 or pagina > 10:
+                break
+
+    print(f"STRAVA: {len(todas_atividades)} corridas encontradas nos ultimos {dias} dias")
+    return todas_atividades
 
 def formatar_atividades_para_claude(atividades: list) -> str:
     """Formata as atividades do Strava em texto para o Claude analisar."""
     if not atividades:
         return ""
 
-    linhas = ["📊 TREINOS RECENTES NO STRAVA:"]
-    for a in atividades:
-        data       = a.get("start_date_local", "")[:10]
-        nome       = a.get("name", "Corrida")
-        distancia  = round(a.get("distance", 0) / 1000, 2)
-        duracao    = int(a.get("moving_time", 0) / 60)
-        pace_seg   = a.get("moving_time", 0) / (a.get("distance", 1) / 1000)
-        pace_min   = int(pace_seg // 60)
-        pace_sec   = int(pace_seg % 60)
-        fc_media   = a.get("average_heartrate", "—")
-        elevacao   = round(a.get("total_elevation_gain", 0))
+    from datetime import datetime, timedelta
+
+    # Ordena do mais recente para o mais antigo
+    atividades_ordenadas = sorted(atividades, key=lambda a: a.get("start_date_local", ""), reverse=True)
+
+    # Resumo geral
+    total_km      = round(sum(a.get("distance", 0) for a in atividades) / 1000, 1)
+    total_treinos = len(atividades)
+    total_horas   = round(sum(a.get("moving_time", 0) for a in atividades) / 3600, 1)
+
+    # Pace medio geral
+    dist_total_m  = sum(a.get("distance", 0) for a in atividades)
+    tempo_total_s = sum(a.get("moving_time", 0) for a in atividades)
+    if dist_total_m > 0:
+        pace_medio_s = tempo_total_s / (dist_total_m / 1000)
+        pace_min = int(pace_medio_s // 60)
+        pace_sec = int(pace_medio_s % 60)
+        pace_medio_str = f"{pace_min}:{pace_sec:02d}/km"
+    else:
+        pace_medio_str = "—"
+
+    # Media semanal ultimas 4 semanas
+    quatro_semanas = (datetime.now() - timedelta(weeks=4)).strftime("%Y-%m-%d")
+    atividades_recentes = [a for a in atividades if a.get("start_date_local", "") >= quatro_semanas]
+    km_4semanas   = round(sum(a.get("distance", 0) for a in atividades_recentes) / 1000, 1)
+    media_semanal = round(km_4semanas / 4, 1)
+
+    linhas = [
+        "HISTORICO STRAVA — ULTIMOS 365 DIAS:",
+        f"Total: {total_treinos} corridas | {total_km}km | {total_horas}h",
+        f"Pace medio geral: {pace_medio_str}",
+        f"Media semanal (ultimas 4 semanas): {media_semanal}km/semana",
+        "",
+        "ULTIMAS 20 CORRIDAS:"
+    ]
+
+    for a in atividades_ordenadas[:20]:
+        data      = a.get("start_date_local", "")[:10]
+        nome      = a.get("name", "Corrida")
+        distancia = round(a.get("distance", 0) / 1000, 2)
+        duracao   = int(a.get("moving_time", 0) / 60)
+        fc_media  = a.get("average_heartrate", "—")
+        elevacao  = round(a.get("total_elevation_gain", 0))
+
+        dist_km = a.get("distance", 0) / 1000
+        tempo_s = a.get("moving_time", 0)
+        if dist_km > 0:
+            pace_s   = tempo_s / dist_km
+            pace_min = int(pace_s // 60)
+            pace_sec = int(pace_s % 60)
+            pace_str = f"{pace_min}:{pace_sec:02d}/km"
+        else:
+            pace_str = "—"
 
         linhas.append(
-            f"• {data} — {nome}: {distancia}km em {duracao}min "
-            f"| Pace: {pace_min}:{pace_sec:02d}/km "
-            f"| FC média: {fc_media} bpm "
-            f"| Elevação: {elevacao}m"
+            f"• {data} — {nome}: {distancia}km em {duracao}min"
+            f" | Pace: {pace_str}"
+            f" | FC: {fc_media} bpm"
+            f" | Elev: {elevacao}m"
         )
 
     return "\n".join(linhas)
