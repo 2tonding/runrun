@@ -410,7 +410,7 @@ async def chamar_claude(telefone: str, mensagem_usuario: str) -> str:
     token = obter_token_strava(telefone)
     print(f"STRAVA TOKEN ENCONTRADO: {token is not None}")
     if token:
-        atividades = await buscar_atividades_strava(telefone, dias=365)
+        atividades = await buscar_atividades_strava(telefone, dias=7)
         print(f"STRAVA ATIVIDADES: {len(atividades)}")
         if atividades:
             contexto_strava = "\n\n" + formatar_atividades_para_claude(atividades)
@@ -418,8 +418,10 @@ async def chamar_claude(telefone: str, mensagem_usuario: str) -> str:
         else:
             print("STRAVA: nenhuma atividade encontrada nos ultimos 7 dias")
 
-    # Injeta os dados do Strava no system prompt se houver
-    system = SYSTEM_PROMPT
+    # Injeta data atual e dados do Strava no system prompt
+    hoje = datetime.now().strftime("%d/%m/%Y")
+    dia_semana = ["segunda-feira","terca-feira","quarta-feira","quinta-feira","sexta-feira","sabado","domingo"][datetime.now().weekday()]
+    system = SYSTEM_PROMPT + f"\n\nDATA ATUAL: {dia_semana}, {hoje}"
     if contexto_strava:
         system += f"\n\nDADOS ATUAIS DO STRAVA DO ALUNO:{contexto_strava}"
         print("STRAVA: contexto injetado no system prompt")
