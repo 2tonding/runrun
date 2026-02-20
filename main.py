@@ -560,14 +560,18 @@ def ver_conversa(telefone: str, admin: str = Depends(verificar_admin)):
         nome_atleta = f"{atleta.get('firstname', '')} {atleta.get('lastname', '')}".strip()
         strava_info = f"""
         <div class="strava-box">
-            🟠 <strong>Strava conectado</strong> — {nome_atleta}
+            Strava conectado — {nome_atleta}
+            &nbsp;&nbsp;
+            <a href="/admin/desconectar-strava/{telefone}"
+               onclick="return confirm('Desconectar Strava de {telefone}?')"
+               style="color:#dc2626;font-size:12px;">Desconectar</a>
         </div>"""
     else:
         link_strava = f"{BASE_URL}/strava/conectar/{telefone}"
         strava_info = f"""
         <div class="strava-box">
-            ⚠️ Strava não conectado —
-            <a href="{link_strava}" target="_blank">Link de conexão para enviar ao aluno</a>
+            Strava nao conectado —
+            <a href="{link_strava}" target="_blank">Link de conexao para enviar ao aluno</a>
         </div>"""
 
     if not historico:
@@ -608,9 +612,16 @@ def ver_conversa(telefone: str, admin: str = Depends(verificar_admin)):
 
 @app.get("/admin/apagar/{telefone}")
 def apagar_historico(telefone: str, admin: str = Depends(verificar_admin)):
-    """Apaga o histórico de um aluno e volta para o painel."""
+    """Apaga o historico de um aluno e volta para o painel."""
     r.delete(f"historico:{telefone}")
     return RedirectResponse(url="/admin")
+
+
+@app.get("/admin/desconectar-strava/{telefone}")
+def desconectar_strava(telefone: str, admin: str = Depends(verificar_admin)):
+    """Desconecta o Strava de um aluno e volta para a conversa."""
+    r.delete(f"strava:{telefone}")
+    return RedirectResponse(url=f"/admin/conversa/{telefone}")
 
 # ============================================================
 # WEBHOOK — recebe mensagens do WhatsApp
