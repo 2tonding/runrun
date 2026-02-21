@@ -164,14 +164,14 @@ async def extrair_texto_pdf(url_arquivo: str) -> str:
 
         with pdfplumber.open(io.BytesIO(conteudo)) as pdf:
             paginas = []
-            for i, pagina in enumerate(pdf.pages[:20]):  # limite de 20 paginas
+            for i, pagina in enumerate(pdf.pages[:50]):  # limite de 50 paginas
                 texto = pagina.extract_text()
                 if texto:
                     paginas.append(f"[Pagina {i+1}]\n{texto}")
 
         texto_completo = "\n\n".join(paginas)
         print(f"PDF EXTRAIDO: {len(texto_completo)} caracteres")
-        return f"[Conteudo do PDF enviado pelo usuario]:\n{texto_completo[:8000]}"
+        return f"[Conteudo do PDF enviado pelo usuario]:\n{texto_completo[:20000]}"
 
     except Exception as e:
         print(f"ERRO ao ler PDF: {e}")
@@ -194,7 +194,7 @@ async def extrair_texto_excel(url_arquivo: str) -> str:
             ws = wb[nome_aba]
             linhas_total.append(f"[Aba: {nome_aba}]")
             for i, row in enumerate(ws.iter_rows(values_only=True)):
-                if i >= 100:  # limite de 100 linhas por aba
+                if i >= 500:  # limite de 500 linhas por aba
                     linhas_total.append("... (mais linhas omitidas)")
                     break
                 linha = " | ".join(str(c) if c is not None else "" for c in row)
@@ -203,7 +203,7 @@ async def extrair_texto_excel(url_arquivo: str) -> str:
 
         texto_completo = "\n".join(linhas_total)
         print(f"EXCEL EXTRAIDO: {len(texto_completo)} caracteres")
-        return f"[Conteudo da planilha enviada pelo usuario]:\n{texto_completo[:8000]}"
+        return f"[Conteudo da planilha enviada pelo usuario]:\n{texto_completo[:20000]}"
 
     except Exception as e:
         print(f"ERRO ao ler Excel: {e}")
